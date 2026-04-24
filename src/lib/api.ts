@@ -1,21 +1,9 @@
 // API client with refresh-token logic
-import type { AuthState } from './stores';
 import { loadTokensFromStorage, saveTokens, clearAuth } from './stores';
+import { parseLoginResponse, parseIMDGList, type LoginResponse } from './validators';
 
 const BASE = '/api';
-
-type AuthToken = {
-  token: string;
-  lifeTime?: number;
-};
-
-type LoginResponse = {
-  access?: AuthToken;
-  refresh?: AuthToken;
-  access_token?: string;
-  refresh_token?: string;
-  token?: string;
-};
+const DEFAULT_TIMEOUT = 12_000; // ms
 
 function getAccessToken(data: LoginResponse): string | null {
   return data.access?.token ?? data.access_token ?? data.token ?? null;
@@ -28,39 +16,56 @@ function getRefreshToken(data: LoginResponse): string | null {
 let isRefreshing = false;
 let refreshPromise: Promise<void> | null = null;
 
-async function doRefresh(refreshToken: string) {
-  const res = await fetch(`${BASE}/authentication/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken })
-  });
+async function doRefresh(refreshToken: string): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
+  try {
+    const res = await fetch(`${BASE}/authentication/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+      signal: controller.signal,
+    });
 
-  if (!res.ok) throw new Error('refresh-failed');
-  const data: LoginResponse = await res.json();
+    if (!res.ok) throw new Error('refresh-failed');
+    const dataRaw = await res.json().catch(() => ({} as unknown));
+    const data = parseLoginResponse(dataRaw);
 
-  const access = getAccessToken(data);
-  if (!access) throw new Error('refresh-failed-no-access-token');
+    const access = getAccessToken(data);
+    if (!access) throw new Error('refresh-failed-no-access-token');
 
-  const nextRefresh = getRefreshToken(data) ?? refreshToken;
-  saveTokens(access, nextRefresh);
+    const nextRefresh = getRefreshToken(data) ?? refreshToken;
+    saveTokens(access, nextRefresh);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function login(email: string, password: string) {
-  const res = await fetch(`${BASE}/authentication/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password })
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`login failed: ${res.status} ${text}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
+  try {
+    const res = await fetch(`${BASE}/authentication/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`login failed: ${res.status} ${text}`);
+    }
+
+    const dataRaw = await res.json().catch(() => ({} as unknown));
+    const data = parseLoginResponse(dataRaw);
+    const access = getAccessToken(data);
+    if (!access) throw new Error('login failed: access token missing');
+
+    saveTokens(access, getRefreshToken(data));
+  } finally {
+    clearTimeout(timer);
   }
-  const data: LoginResponse = await res.json();
-
-  const access = getAccessToken(data);
-  if (!access) throw new Error('login failed: access token missing');
-
-  saveTokens(access, getRefreshToken(data));
 }
 
 async function tryRefreshOnce(): Promise<void> {
@@ -72,6 +77,7 @@ async function tryRefreshOnce(): Promise<void> {
       if (!refreshToken) throw new Error('no-refresh-token');
       await doRefresh(refreshToken);
     } catch (e) {
+      // clear auth on refresh failure
       clearAuth();
       throw e;
     } finally {
@@ -82,50 +88,81 @@ async function tryRefreshOnce(): Promise<void> {
   return refreshPromise;
 }
 
-export async function fetchWithAuth(input: RequestInfo, init: RequestInit = {}, retry = true): Promise<Response> {
+/**
+ * fetch wrapper that automatically attaches access token and tries one refresh on 401.
+ * Respects an optional timeout via DEFAULT_TIMEOUT.
+ */
+export async function fetchWithAuth(
+  input: RequestInfo,
+  init: RequestInit = {},
+  retry = true,
+  timeout = DEFAULT_TIMEOUT
+): Promise<Response> {
   loadTokensFromStorage();
-  const accessToken = localStorage.getItem('access_token');
+
   const headers = new Headers(init.headers ?? {});
+  const accessToken = localStorage.getItem('access_token');
   if (accessToken) headers.set('Token', accessToken);
 
-  const res = await fetch(typeof input === 'string' ? input : input, { ...init, headers });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const res = await fetch(typeof input === 'string' ? input : input, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
 
-  if (res.status === 401 && retry) {
-    try {
+    if (res.status === 401 && retry) {
       await tryRefreshOnce();
       const newAccess = localStorage.getItem('access_token');
       const h2 = new Headers(init.headers ?? {});
       if (newAccess) h2.set('Token', newAccess);
-      return fetch(typeof input === 'string' ? input : input, { ...init, headers: h2 });
-    } catch (e) {
-      throw e;
+      return await fetch(typeof input === 'string' ? input : input, { ...init, headers: h2 });
     }
+
+    return res;
+  } finally {
+    clearTimeout(timer);
   }
-  return res;
 }
 
-export type IMDGItem = Record<string, any>;
+export type IMDGItem = Record<string, unknown>;
 
-export async function getIMDGList(params: { page?: number; pageSize?: number; filters?: Record<string, string> }) {
+export async function getIMDGList(
+  params: { page?: number; pageSize?: number; filters?: Record<string, string> } = {}
+) {
   const p = new URLSearchParams();
-  if (params.page) p.set('page', String(params.page));
-  if (params.pageSize) p.set('perPage', String(params.pageSize));
+  if (typeof params.page === 'number') p.set('page', String(params.page));
+  if (typeof params.pageSize === 'number') p.set('perPage', String(params.pageSize));
   if (params.filters) {
-    for (const k of Object.keys(params.filters)) {
-      if (params.filters[k]) p.set(k, params.filters[k]);
+    for (const [k, v] of Object.entries(params.filters)) {
+      if (v) p.set(k, v);
     }
   }
 
-  const url = `${BASE}/imdg?${p.toString()}`;
+  const url = `${BASE}/imdg${p.toString() ? `?${p.toString()}` : ''}`;
   const res = await fetchWithAuth(url);
   if (!res.ok) throw new Error(`imdg list failed: ${res.status}`);
-  const list = (await res.json()) as IMDGItem[];
 
-  const countRes = await fetchWithAuth(`${BASE}/imdg/count`);
-  const countText = await countRes.text();
-  const total = Number(countText);
+  // Try to parse JSON, but handle non-json gracefully
+  // Parse and validate IMDG list
+  const listRaw = await res.json().catch(() => [] as unknown);
+  const list = parseIMDGList(listRaw) as IMDGItem[];
 
-  return { items: Array.isArray(list) ? list : [], total: Number.isNaN(total) ? 0 : total };
+  let total = 0;
+  try {
+    const countRes = await fetchWithAuth(`${BASE}/imdg/count`);
+    if (countRes.ok) {
+      const countText = await countRes.text();
+      const parsed = Number(countText);
+      total = Number.isNaN(parsed) ? 0 : parsed;
+    }
+  } catch (e) {
+    // ignore count failures, keep total = 0
+  }
+
+  return { items: Array.isArray(list) ? list : [], total };
 }
 
 export { BASE };

@@ -1,7 +1,7 @@
 <script lang="ts">
   import '../app.css';
   import { onMount } from 'svelte';
-  import { loadTokensFromStorage, auth } from '$lib/stores';
+  import { loadTokensFromStorage } from '$lib/stores';
   import ToastContainer from '$lib/components/ToastContainer.svelte';
   import { language, initLanguage, setLanguage, t } from '$lib/i18n';
   import { initTheme, setTheme, theme } from '$lib/theme';

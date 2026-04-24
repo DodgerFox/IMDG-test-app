@@ -1,9 +1,18 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { basicAuth, fetchUpstream, passthroughResponse, upstreamFailureResponse, upstreamHeaders } from '$lib/server/upstream';
+import {
+  basicAuth,
+  fetchUpstream,
+  passthroughResponse,
+  upstreamFailureResponse,
+  upstreamHeaders,
+} from '$lib/server/upstream';
 
 export const POST: RequestHandler = async ({ request }) => {
-  const body = (await request.json().catch(() => null)) as { email?: string; password?: string } | null;
+  const body = (await request.json().catch(() => null)) as {
+    email?: string;
+    password?: string;
+  } | null;
 
   const email = body?.email?.trim();
   const password = body?.password ?? '';
@@ -16,8 +25,8 @@ export const POST: RequestHandler = async ({ request }) => {
     const upstream = await fetchUpstream('/authentication', {
       method: 'GET',
       headers: upstreamHeaders({
-        Authorization: basicAuth(email, password)
-      })
+        Authorization: basicAuth(email, password),
+      }),
     });
 
     return passthroughResponse(upstream);

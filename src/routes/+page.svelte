@@ -9,7 +9,7 @@
   const password = writable('');
   const loading = writable(false);
 
-  function mapApiMessage(msg: string): string {
+  const mapApiMessage = (msg: string): string => {
     const normalized = msg.trim().toLowerCase();
 
     if (normalized === 'email is required') {
@@ -25,9 +25,9 @@
     }
 
     return msg;
-  }
+  };
 
-  function normalizeErrorMessage(err: unknown): string {
+  const normalizeErrorMessage = (err: unknown): string => {
     if (err instanceof Error) {
       const raw = err.message;
       const marker = 'login failed:';
@@ -70,14 +70,15 @@
     return t('login.error.default', $language);
   }
 
-  async function submit(e: Event) {
+  import { get } from 'svelte/store';
+
+  const submit = async (e: Event) => {
     e.preventDefault();
     loading.set(true);
     try {
-      let em: string, pw: string;
-      email.subscribe((v) => (em = v))();
-      password.subscribe((v) => (pw = v))();
-      await login(em!, pw!);
+      const em = get(email);
+      const pw = get(password);
+      await login(em, pw);
       toasts.success(t('login.success', $language));
       // After login go to registry
       goto('/imdg');
@@ -86,7 +87,7 @@
     } finally {
       loading.set(false);
     }
-  }
+  };
 </script>
 
 <section class="app-surface mx-auto max-w-md rounded-2xl p-6 sm:p-7">

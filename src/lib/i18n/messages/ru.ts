@@ -48,7 +48,7 @@ const ru = {
   'imdg.error.unauthorized': 'Сессия истекла. Выполните вход заново',
   'imdg.error.tokenRequired': 'Требуется авторизация',
   'imdg.error.serverUnavailable': 'Сервис IMDG временно недоступен. Попробуйте позже',
-  'imdg.error.network': 'Проблема с сетью. Проверьте подключение'
+  'imdg.error.network': 'Проблема с сетью. Проверьте подключение',
 } as const;
 
 export default ru;

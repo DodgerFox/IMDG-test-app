@@ -48,7 +48,7 @@ const en = {
   'imdg.error.unauthorized': 'Session has expired. Please sign in again',
   'imdg.error.tokenRequired': 'Authorization is required',
   'imdg.error.serverUnavailable': 'IMDG service is temporarily unavailable. Please try again later',
-  'imdg.error.network': 'Network issue. Please check your connection'
+  'imdg.error.network': 'Network issue. Please check your connection',
 } as const;
 
 export default en;

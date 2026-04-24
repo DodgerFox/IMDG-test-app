@@ -1,6 +1,11 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { fetchUpstream, passthroughResponse, upstreamFailureResponse, upstreamHeaders } from '$lib/server/upstream';
+import {
+  fetchUpstream,
+  passthroughResponse,
+  upstreamFailureResponse,
+  upstreamHeaders,
+} from '$lib/server/upstream';
 
 export const GET: RequestHandler = async ({ request, url }) => {
   const token = request.headers.get('Token') ?? request.headers.get('token');
@@ -12,7 +17,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
   try {
     const upstream = await fetchUpstream(`/imdg${query ? `?${query}` : ''}`, {
       method: 'GET',
-      headers: upstreamHeaders({ Token: token })
+      headers: upstreamHeaders({ Token: token }),
     });
 
     return passthroughResponse(upstream);

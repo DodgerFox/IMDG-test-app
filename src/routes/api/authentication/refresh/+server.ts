@@ -1,6 +1,11 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { fetchUpstream, passthroughResponse, upstreamFailureResponse, upstreamHeaders } from '$lib/server/upstream';
+import {
+  fetchUpstream,
+  passthroughResponse,
+  upstreamFailureResponse,
+  upstreamHeaders,
+} from '$lib/server/upstream';
 
 export const POST: RequestHandler = async ({ request }) => {
   const body = (await request.json().catch(() => null)) as { refreshToken?: string } | null;
@@ -13,7 +18,7 @@ export const POST: RequestHandler = async ({ request }) => {
   try {
     const upstream = await fetchUpstream('/authentication/refresh', {
       method: 'GET',
-      headers: upstreamHeaders({ Token: refreshToken })
+      headers: upstreamHeaders({ Token: refreshToken }),
     });
 
     return passthroughResponse(upstream);

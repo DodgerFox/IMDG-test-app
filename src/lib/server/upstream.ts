@@ -17,7 +17,10 @@ export function upstreamHeaders(extra?: HeadersInit): Headers {
   return headers;
 }
 
-export async function fetchUpstream(pathWithLeadingSlash: string, init?: RequestInit): Promise<Response> {
+export async function fetchUpstream(
+  pathWithLeadingSlash: string,
+  init?: RequestInit
+): Promise<Response> {
   const url = upstreamUrl(pathWithLeadingSlash);
   let lastError: unknown;
 
@@ -29,7 +32,7 @@ export async function fetchUpstream(pathWithLeadingSlash: string, init?: Request
       const response = await fetch(url, {
         ...init,
         signal: controller.signal,
-        cache: 'no-store'
+        cache: 'no-store',
       });
       clearTimeout(timer);
       return response;
@@ -52,13 +55,13 @@ export function upstreamFailureResponse(error: unknown): Response {
   return new Response(
     JSON.stringify({
       message: 'Upstream service is temporarily unavailable',
-      details: message
+      details: message,
     }),
     {
       status: 502,
       headers: {
-        'content-type': 'application/json; charset=utf-8'
-      }
+        'content-type': 'application/json; charset=utf-8',
+      },
     }
   );
 }
@@ -69,7 +72,7 @@ export function passthroughResponse(upstream: Response): Response {
     status: upstream.status,
     statusText: upstream.statusText,
     headers: {
-      'content-type': contentType
-    }
+      'content-type': contentType,
+    },
   });
 }

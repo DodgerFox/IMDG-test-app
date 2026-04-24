@@ -3,23 +3,23 @@
   import { toasts } from '$lib/toasts';
   import { language, t } from '$lib/i18n';
 
-  function colorByType(type: 'success' | 'error' | 'info'): string {
+  const colorByType = (type: 'success' | 'error' | 'info'): string => {
     if (type === 'success') return 'border-green-200 bg-green-50 text-green-900';
     if (type === 'error') return 'border-red-200 bg-red-50 text-red-900';
     return 'border-blue-200 bg-blue-50 text-blue-900';
-  }
+  };
 
-  function titleByType(type: 'success' | 'error' | 'info'): string {
+  const titleByType = (type: 'success' | 'error' | 'info'): string => {
     if (type === 'success') return t('toast.success.title', $language);
     if (type === 'error') return t('toast.error.title', $language);
     return t('toast.info.title', $language);
-  }
+  };
 
-  function iconByType(type: 'success' | 'error' | 'info'): string {
+  const iconByType = (type: 'success' | 'error' | 'info'): string => {
     if (type === 'success') return '✓';
     if (type === 'error') return '⚠';
     return 'ℹ';
-  }
+  };
 </script>
 
 <div class="fixed inset-x-0 bottom-2 z-50 pointer-events-none sm:bottom-4">

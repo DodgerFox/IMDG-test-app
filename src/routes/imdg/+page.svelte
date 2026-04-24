@@ -47,12 +47,12 @@
   let lastErrorMessage = '';
   let lastErrorAt = 0;
 
-  function getColumnWidth(col: string): number {
+  const getColumnWidth = (col: string): number => {
     if (columnWidths[col]) return columnWidths[col];
     return Math.max(90, Math.min(300, 110 + col.length * 6));
-  }
+  };
 
-  function ensureColumnWidths(cols: string[]) {
+  const ensureColumnWidths = (cols: string[]) => {
     const next = { ...columnWidths };
     let changed = false;
     for (const col of cols) {
@@ -65,9 +65,9 @@
       columnWidths = next;
       saveColumnWidths();
     }
-  }
+  };
 
-  function loadColumnWidths() {
+  const loadColumnWidths = () => {
     if (!browser) return;
     try {
       const raw = localStorage.getItem(WIDTHS_STORAGE_KEY);
@@ -85,14 +85,14 @@
     } catch {
       // ignore localStorage parse errors
     }
-  }
+  };
 
-  function saveColumnWidths() {
+  const saveColumnWidths = () => {
     if (!browser) return;
     localStorage.setItem(WIDTHS_STORAGE_KEY, JSON.stringify(columnWidths));
-  }
+  };
 
-  function beginResize(clientX: number, col: string) {
+  const beginResize = (clientX: number, col: string) => {
     if (!browser) return;
 
     resizeColumn = col;
@@ -107,16 +107,16 @@
     window.addEventListener('pointermove', onResizeMove);
     window.addEventListener('pointerup', stopResize);
     window.addEventListener('blur', stopResize);
-  }
+  };
 
-  function onResizeMove(e: MouseEvent | PointerEvent) {
+  const onResizeMove = (e: MouseEvent | PointerEvent) => {
     if (!resizeColumn) return;
     const delta = e.clientX - resizeStartX;
     const nextWidth = Math.max(44, resizeStartWidth + delta);
     columnWidths = { ...columnWidths, [resizeColumn]: nextWidth };
-  }
+  };
 
-  function stopResize() {
+  const stopResize = () => {
     if (!resizeColumn) return;
     resizeColumn = null;
     saveColumnWidths();
@@ -129,44 +129,44 @@
     window.removeEventListener('pointermove', onResizeMove);
     window.removeEventListener('pointerup', stopResize);
     window.removeEventListener('blur', stopResize);
-  }
+  };
 
-  function onResizeHandlePointerDown(e: PointerEvent, col: string) {
+  const onResizeHandlePointerDown = (e: PointerEvent, col: string) => {
     if (!browser || resizeColumn) return;
     e.preventDefault();
     e.stopPropagation();
     beginResize(e.clientX, col);
-  }
+  };
 
-  function onResizeHandleMouseDown(e: MouseEvent, col: string) {
+  const onResizeHandleMouseDown = (e: MouseEvent, col: string) => {
     if (!browser || resizeColumn) return;
     e.preventDefault();
     e.stopPropagation();
     beginResize(e.clientX, col);
-  }
+  };
 
-  function isNarrowColumn(col: string): boolean {
+  const isNarrowColumn = (col: string): boolean => {
     return getColumnWidth(col) < 60;
-  }
+  };
 
-  function filterInputWidth(col: string): number {
+  const filterInputWidth = (col: string): number => {
     if (focusedFilterColumn === col) return 200;
     return Math.max(60, Math.min(160, getColumnWidth(col) - 14));
-  }
+  };
 
-  function filterId(col: string): string {
+  const filterId = (col: string): string => {
     return `imdg-filter-${col.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-  }
+  };
 
-  async function openNarrowFilter(col: string) {
+  const openNarrowFilter = async (col: string) => {
     if (!browser) return;
     activeFilterColumn = col;
     await tick();
     const el = document.getElementById(filterId(col)) as HTMLInputElement | null;
     el?.focus();
-  }
+  };
 
-  function normalizeImdgError(err: unknown): string {
+  const normalizeImdgError = (err: unknown): string => {
     if (err instanceof Error) {
       const raw = err.message;
       const lower = raw.toLowerCase();
@@ -189,9 +189,9 @@
     }
 
     return t('imdg.error.default', $language);
-  }
+  };
 
-  function notifyImdgError(err: unknown) {
+  const notifyImdgError = (err: unknown) => {
     const message = normalizeImdgError(err);
     const now = Date.now();
 
@@ -202,9 +202,9 @@
     lastErrorMessage = message;
     lastErrorAt = now;
     toasts.error(message);
-  }
+  };
 
-  async function load() {
+  const load = async () => {
     loading = true;
     const p = getNumber(page);
     const ps = getNumber(pageSize);
@@ -226,7 +226,9 @@
         columns = [];
       }
     } catch (e) {
-      console.error('load error', e);
+      // Log via toast and avoid leaking raw errors to console in production
+      // keep a minimal console.debug for local dev diagnostics
+      console.debug('load error', e);
       items = [];
       total = 0;
       columns = [];
@@ -234,40 +236,45 @@
     } finally {
       loading = false;
     }
-  }
+  };
 
-  function getNumber(n: any) {
-    return typeof n === 'number' ? n : Number(n || 1);
-  }
+  const getNumber = (n: string | number | undefined | null) => {
+    if (typeof n === 'number') return n;
+    if (typeof n === 'string' && n.trim() !== '') {
+      const parsed = Number(n);
+      return Number.isFinite(parsed) ? parsed : 1;
+    }
+    return 1;
+  };
 
-  function setColumnFilter(key: string, value: string) {
+  const setColumnFilter = (key: string, value: string) => {
     columnFilters = { ...columnFilters, [key]: value };
-  }
+  };
 
-  function goPrev() {
+  const goPrev = () => {
     page = Math.max(1, page - 1);
     load();
-  }
+  };
 
-  function goNext() {
+  const goNext = () => {
     page = Math.min(maxPage, page + 1);
     load();
-  }
+  };
 
-  function onPageSizeChange() {
+  const onPageSizeChange = () => {
     page = 1;
     load();
-  }
+  };
 
-  function openDetails(item: Item) {
+  const openDetails = (item: Item) => {
     selectedItem = item;
-  }
+  };
 
-  function closeDetails() {
+  const closeDetails = () => {
     selectedItem = null;
-  }
+  };
 
-  async function copyValue(value: unknown) {
+  const copyValue = async (value: unknown) => {
     if (!browser) return;
     const text = value === null || value === undefined ? '' : String(value);
 
@@ -277,20 +284,20 @@
     } catch {
       toasts.error(t('imdg.copy.error', $language));
     }
-  }
+  };
 
-  function onWindowKeyDown(e: KeyboardEvent) {
+  const onWindowKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape' && selectedItem) {
       closeDetails();
     }
-  }
+  };
 
-  function isDateColumn(col: string): boolean {
+  const isDateColumn = (col: string): boolean => {
     const c = col.toLowerCase();
     return c === 'createdat' || c === 'updatedat';
-  }
+  };
 
-  function formatCellValue(col: string, value: unknown): string {
+  const formatCellValue = (col: string, value: unknown): string => {
     if (value === null || value === undefined || value === '') return '—';
 
     if (typeof value === 'string' && isDateColumn(col)) {
@@ -308,7 +315,7 @@
     }
 
     return String(value);
-  }
+  };
 
   onMount(() => {
     loadColumnWidths();
