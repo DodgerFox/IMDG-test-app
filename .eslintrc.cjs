@@ -20,13 +20,6 @@ module.exports = {
         parser: '@typescript-eslint/parser'
       },
       rules: {}
-    },
-    {
-      files: ['src/lib/__tests__/**/*.ts'],
-      rules: {
-        '@typescript-eslint/no-explicit-any': 'off',
-        '@typescript-eslint/no-unused-vars': 'off'
-      }
     }
   ],
   rules: {

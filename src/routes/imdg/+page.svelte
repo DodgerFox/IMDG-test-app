@@ -1,497 +1,344 @@
 <script lang="ts">
-  import { browser } from '$app/environment';
-  import { onMount, tick } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
   import { getIMDGList } from '$lib/api';
-  import { language, t } from '$lib/i18n';
   import { toasts } from '$lib/toasts';
 
   type Item = Record<string, unknown>;
 
   let items: Item[] = [];
+  let serverItems: Item[] = [];
+  let columns: string[] = [];
+  let filters: Record<string, string> = {};
+  let appliedServerFilters: Record<string, string> = {};
   let total = 0;
   let page = 1;
   let pageSize = 10;
   let loading = false;
-  let columns: string[] = [];
-  let columnFilters: Record<string, string> = {};
-  let columnWidths: Record<string, number> = {};
-  let activeFilterColumn: string | null = null;
+  let loadingProgress = 0;
+  let progressTimer: ReturnType<typeof setInterval> | null = null;
+  let requestId = 0;
   let focusedFilterColumn: string | null = null;
-  let selectedItem: Item | null = null;
 
-  const WIDTHS_STORAGE_KEY = 'imdg-column-widths-v1';
-
-  let resizeColumn: string | null = null;
-  let resizeStartX = 0;
-  let resizeStartWidth = 0;
-
-  $: filteredItems = items.filter((item) => {
-    return columns.every((col) => {
-      const filter = (columnFilters[col] ?? '').trim().toLowerCase();
-      if (!filter) return true;
-      return String(item[col] ?? '').toLowerCase().includes(filter);
-    });
-  });
+  const excludedFilterColumns = new Set<string>([
+    'createdAt',
+    'updatedAt',
+    ...Array.from({ length: 17 }, (_, idx) => `col${idx + 3}`),
+  ]);
+  let localOnlyColumns = new Set<string>(['uuid']);
+  let localFallbackNotified = new Set<string>();
 
   $: maxPage = Math.max(1, Math.ceil(total / pageSize));
-
-  $: detailsEntries = selectedItem
-    ? [
-        ...columns
-          .filter((col) => col in selectedItem)
-          .map((col) => [col, selectedItem[col]] as [string, unknown]),
-        ...Object.entries(selectedItem).filter(([k]) => !columns.includes(k))
-      ]
-    : [];
-
-  let lastErrorMessage = '';
-  let lastErrorAt = 0;
-
-  const getColumnWidth = (col: string): number => {
-    if (columnWidths[col]) return columnWidths[col];
-    return Math.max(90, Math.min(300, 110 + col.length * 6));
-  };
-
-  const ensureColumnWidths = (cols: string[]) => {
-    const next = { ...columnWidths };
-    let changed = false;
-    for (const col of cols) {
-      if (!next[col]) {
-        next[col] = Math.max(90, Math.min(300, 110 + col.length * 6));
-        changed = true;
-      }
+  $: activeFilters = Object.fromEntries(
+    Object.entries(filters).filter(
+      ([key, value]) => !excludedFilterColumns.has(key) && value.trim() !== ''
+    )
+  );
+  $: localFilters = Object.fromEntries(
+    Object.entries(activeFilters).filter(([key]) => localOnlyColumns.has(key))
+  );
+  $: serverFilters = Object.fromEntries(
+    Object.entries(activeFilters).filter(([key]) => !localOnlyColumns.has(key))
+  );
+  $: items = serverItems.filter((row) => {
+    for (const [key, value] of Object.entries(localFilters)) {
+      const cell = String(row[key] ?? '').toLowerCase();
+      if (!cell.includes(value.toLowerCase())) return false;
     }
-    if (changed) {
-      columnWidths = next;
-      saveColumnWidths();
-    }
-  };
-
-  const loadColumnWidths = () => {
-    if (!browser) return;
-    try {
-      const raw = localStorage.getItem(WIDTHS_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        const safe: Record<string, number> = {};
-        for (const [k, v] of Object.entries(parsed)) {
-          if (typeof v === 'number' && Number.isFinite(v)) {
-            safe[k] = Math.max(44, Math.min(900, v));
-          }
-        }
-        columnWidths = safe;
-      }
-    } catch {
-      // ignore localStorage parse errors
-    }
-  };
-
-  const saveColumnWidths = () => {
-    if (!browser) return;
-    localStorage.setItem(WIDTHS_STORAGE_KEY, JSON.stringify(columnWidths));
-  };
-
-  const beginResize = (clientX: number, col: string) => {
-    if (!browser) return;
-
-    resizeColumn = col;
-    resizeStartX = clientX;
-    resizeStartWidth = getColumnWidth(col);
-
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-
-    window.addEventListener('mousemove', onResizeMove);
-    window.addEventListener('mouseup', stopResize);
-    window.addEventListener('pointermove', onResizeMove);
-    window.addEventListener('pointerup', stopResize);
-    window.addEventListener('blur', stopResize);
-  };
-
-  const onResizeMove = (e: MouseEvent | PointerEvent) => {
-    if (!resizeColumn) return;
-    const delta = e.clientX - resizeStartX;
-    const nextWidth = Math.max(44, resizeStartWidth + delta);
-    columnWidths = { ...columnWidths, [resizeColumn]: nextWidth };
-  };
-
-  const stopResize = () => {
-    if (!resizeColumn) return;
-    resizeColumn = null;
-    saveColumnWidths();
-
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-
-    window.removeEventListener('mousemove', onResizeMove);
-    window.removeEventListener('mouseup', stopResize);
-    window.removeEventListener('pointermove', onResizeMove);
-    window.removeEventListener('pointerup', stopResize);
-    window.removeEventListener('blur', stopResize);
-  };
-
-  const onResizeHandlePointerDown = (e: PointerEvent, col: string) => {
-    if (!browser || resizeColumn) return;
-    e.preventDefault();
-    e.stopPropagation();
-    beginResize(e.clientX, col);
-  };
-
-  const onResizeHandleMouseDown = (e: MouseEvent, col: string) => {
-    if (!browser || resizeColumn) return;
-    e.preventDefault();
-    e.stopPropagation();
-    beginResize(e.clientX, col);
-  };
-
-  const isNarrowColumn = (col: string): boolean => {
-    return getColumnWidth(col) < 60;
-  };
-
-  const filterInputWidth = (col: string): number => {
-    if (focusedFilterColumn === col) return 200;
-    return Math.max(60, Math.min(160, getColumnWidth(col) - 14));
-  };
-
-  const filterId = (col: string): string => {
-    return `imdg-filter-${col.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-  };
-
-  const openNarrowFilter = async (col: string) => {
-    if (!browser) return;
-    activeFilterColumn = col;
-    await tick();
-    const el = document.getElementById(filterId(col)) as HTMLInputElement | null;
-    el?.focus();
-  };
+    return true;
+  });
 
   const normalizeImdgError = (err: unknown): string => {
     if (err instanceof Error) {
-      const raw = err.message;
-      const lower = raw.toLowerCase();
-
-      if (lower.includes('token header is required')) {
-        return t('imdg.error.tokenRequired', $language);
+      const raw = err.message.toLowerCase();
+      if (raw.includes('401') || raw.includes('unauthorized')) return 'Авторизация истекла';
+      if (raw.includes('500') || raw.includes('502') || raw.includes('503') || raw.includes('504')) {
+        return 'Сервер временно недоступен';
       }
-
-      if (lower.includes('failed to fetch') || lower.includes('networkerror')) {
-        return t('imdg.error.network', $language);
-      }
-
-      if (lower.includes('401') || lower.includes('unauthorized')) {
-        return t('imdg.error.unauthorized', $language);
-      }
-
-      if (lower.includes('500') || lower.includes('502') || lower.includes('503') || lower.includes('504')) {
-        return t('imdg.error.serverUnavailable', $language);
-      }
+      if (raw.includes('failed to fetch') || raw.includes('networkerror')) return 'Ошибка сети';
     }
-
-    return t('imdg.error.default', $language);
+    return 'Ошибка загрузки данных';
   };
 
-  const notifyImdgError = (err: unknown) => {
-    const message = normalizeImdgError(err);
-    const now = Date.now();
+  const isUnauthorizedError = (err: unknown): boolean => {
+    if (!(err instanceof Error)) return false;
+    const raw = err.message.toLowerCase();
+    return raw.includes('401') || raw.includes('unauthorized');
+  };
 
-    if (message === lastErrorMessage && now - lastErrorAt < 2500) {
+  const syncFiltersWithColumns = (nextColumns: string[]) => {
+    const next: Record<string, string> = {};
+    for (const col of nextColumns) next[col] = filters[col] ?? '';
+    filters = next;
+  };
+
+  const parseNotFilterableField = (err: unknown): string | null => {
+    if (!(err instanceof Error)) return null;
+    const m = err.message.match(/The field '([^']+)' is not filtrable/i);
+    return m?.[1] ?? null;
+  };
+
+  const extractApiMessage = (err: unknown): string | null => {
+    if (!(err instanceof Error)) return null;
+    const msg = err.message;
+    const jsonStart = msg.indexOf('{');
+    if (jsonStart < 0) return null;
+    try {
+      const payload = JSON.parse(msg.slice(jsonStart));
+      if (payload && typeof payload.message === 'string') return payload.message;
+    } catch {
+      // ignore parse errors
+    }
+    return null;
+  };
+
+  const load = async (filtersForServer: Record<string, string> = serverFilters) => {
+    const currentRequest = ++requestId;
+    loading = true;
+    loadingProgress = 12;
+    if (progressTimer) clearInterval(progressTimer);
+    progressTimer = setInterval(() => {
+      loadingProgress = Math.min(90, loadingProgress + Math.max(1, Math.round((90 - loadingProgress) / 8)));
+    }, 120);
+    try {
+      const data = await getIMDGList({ page, pageSize, filters: filtersForServer });
+      if (currentRequest !== requestId) return;
+      serverItems = data.items ?? [];
+      total = data.total ?? 0;
+      columns = serverItems[0] ? Object.keys(serverItems[0]) : columns;
+      syncFiltersWithColumns(columns);
+      appliedServerFilters = { ...filtersForServer };
+      if (page > maxPage) page = maxPage;
+    } catch (e) {
+      if (currentRequest !== requestId) return;
+      if (isUnauthorizedError(e)) {
+        await goto('/');
+        return;
+      }
+
+      const field = parseNotFilterableField(e);
+      if (field) {
+        const apiMessage = extractApiMessage(e) ?? `The field '${field}' is not filtrable`;
+        toasts.error(apiMessage);
+        localOnlyColumns.add(field);
+        if (!localFallbackNotified.has(field)) {
+          localFallbackNotified.add(field);
+          toasts.info(`Поле "${field}" фильтруется локально по загруженным данным`, 5000);
+        }
+        const retriedFilters = Object.fromEntries(
+          Object.entries(filtersForServer).filter(([key]) => key !== field)
+        );
+        if (JSON.stringify(retriedFilters) !== JSON.stringify(filtersForServer)) {
+          await load(retriedFilters);
+          return;
+        }
+      }
+
+      toasts.error(normalizeImdgError(e));
+    } finally {
+      if (currentRequest === requestId) {
+        if (progressTimer) {
+          clearInterval(progressTimer);
+          progressTimer = null;
+        }
+        loadingProgress = 100;
+        setTimeout(() => {
+          if (currentRequest === requestId) {
+            loading = false;
+            loadingProgress = 0;
+          }
+        }, 120);
+      }
+    }
+  };
+
+  const onFilterInput = (key: string, value: string) => {
+    if (excludedFilterColumns.has(key)) return;
+    filters = { ...filters, [key]: value };
+  };
+
+  const applyFilters = async () => {
+    const serverFiltersChanged = JSON.stringify(serverFilters) !== JSON.stringify(appliedServerFilters);
+    page = 1;
+    if (serverFiltersChanged) {
+      await load(serverFilters);
+    }
+  };
+
+  const onFilterKeyDown = async (e: KeyboardEvent) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    await applyFilters();
+  };
+
+  const filterHint = (col: string): string => {
+    if (col === 'id' || col === 'unid') return 'Число. Enter для поиска';
+    if (col === 'uuid') return 'Текст UUID. Enter для поиска';
+    return 'Текст. Enter для поиска';
+  };
+
+  const onPageSizeChange = async () => {
+    page = 1;
+    await load();
+  };
+
+  const clearAllFilters = async () => {
+    const next: Record<string, string> = {};
+    for (const col of columns) next[col] = '';
+    filters = next;
+    page = 1;
+    await load({});
+  };
+
+  const refreshData = async () => {
+    await load(serverFilters);
+  };
+
+  const goPrev = async () => {
+    page = Math.max(1, page - 1);
+    await load();
+  };
+
+  const goNext = async () => {
+    page = Math.min(maxPage, page + 1);
+    await load();
+  };
+
+  onMount(async () => {
+    const accessToken = localStorage.getItem('access_token');
+    if (!accessToken) {
+      await goto('/');
       return;
     }
-
-    lastErrorMessage = message;
-    lastErrorAt = now;
-    toasts.error(message);
-  };
-
-  const load = async () => {
-    loading = true;
-    const p = getNumber(page);
-    const ps = getNumber(pageSize);
-    try {
-      const data = await getIMDGList({ page: p, pageSize: ps });
-      items = data.items || [];
-      total = data.total || (data.items ? data.items.length : 0);
-      if (items.length > 0) {
-        const nextColumns = Object.keys(items[0]);
-        columns = nextColumns;
-        ensureColumnWidths(nextColumns);
-
-        const nextFilters: Record<string, string> = {};
-        for (const col of nextColumns) {
-          nextFilters[col] = columnFilters[col] ?? '';
-        }
-        columnFilters = nextFilters;
-      } else {
-        columns = [];
-      }
-    } catch (e) {
-      // Log via toast and avoid leaking raw errors to console in production
-      // keep a minimal console.debug for local dev diagnostics
-      console.debug('load error', e);
-      items = [];
-      total = 0;
-      columns = [];
-      notifyImdgError(e);
-    } finally {
-      loading = false;
-    }
-  };
-
-  const getNumber = (n: string | number | undefined | null) => {
-    if (typeof n === 'number') return n;
-    if (typeof n === 'string' && n.trim() !== '') {
-      const parsed = Number(n);
-      return Number.isFinite(parsed) ? parsed : 1;
-    }
-    return 1;
-  };
-
-  const setColumnFilter = (key: string, value: string) => {
-    columnFilters = { ...columnFilters, [key]: value };
-  };
-
-  const goPrev = () => {
-    page = Math.max(1, page - 1);
-    load();
-  };
-
-  const goNext = () => {
-    page = Math.min(maxPage, page + 1);
-    load();
-  };
-
-  const onPageSizeChange = () => {
-    page = 1;
-    load();
-  };
-
-  const openDetails = (item: Item) => {
-    selectedItem = item;
-  };
-
-  const closeDetails = () => {
-    selectedItem = null;
-  };
-
-  const copyValue = async (value: unknown) => {
-    if (!browser) return;
-    const text = value === null || value === undefined ? '' : String(value);
-
-    try {
-      await navigator.clipboard.writeText(text);
-      toasts.success(t('imdg.copy.success', $language));
-    } catch {
-      toasts.error(t('imdg.copy.error', $language));
-    }
-  };
-
-  const onWindowKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape' && selectedItem) {
-      closeDetails();
-    }
-  };
-
-  const isDateColumn = (col: string): boolean => {
-    const c = col.toLowerCase();
-    return c === 'createdat' || c === 'updatedat';
-  };
-
-  const formatCellValue = (col: string, value: unknown): string => {
-    if (value === null || value === undefined || value === '') return '—';
-
-    if (typeof value === 'string' && isDateColumn(col)) {
-      const dt = new Date(value);
-      if (!Number.isNaN(dt.getTime())) {
-        const locale = $language === 'ru' ? 'ru-RU' : 'en-GB';
-        return new Intl.DateTimeFormat(locale, {
-          year: 'numeric',
-          month: 'short',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit'
-        }).format(dt);
-      }
-    }
-
-    return String(value);
-  };
-
-  onMount(() => {
-    loadColumnWidths();
-    load();
-
-    return () => {
-      window.removeEventListener('mousemove', onResizeMove);
-      window.removeEventListener('mouseup', stopResize);
-      window.removeEventListener('pointermove', onResizeMove);
-      window.removeEventListener('pointerup', stopResize);
-      window.removeEventListener('blur', stopResize);
-    };
+    await load();
   });
-
-  $: if (browser && page > maxPage) {
-    page = maxPage;
-  }
 </script>
 
-<svelte:window on:keydown={onWindowKeyDown} />
-
-<section class="app-surface rounded-2xl p-3 sm:p-4">
-
-  <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+<section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+  <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
     <div>
-      <h2 class="text-xl font-semibold">{t('imdg.title', $language)}</h2>
-      <p class="app-text-muted text-sm">
-        {t('imdg.total', $language)} {total} · {filteredItems.length} / {pageSize} {t('imdg.rows', $language)}
-      </p>
+      <h2 class="text-xl font-semibold">Реестр IMDG</h2>
+      <p class="text-sm text-slate-500">Всего: {total}</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <button
+        type="button"
+        class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        on:click={clearAllFilters}
+      >
+        Очистить фильтры
+      </button>
+      <button
+        type="button"
+        class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        on:click={refreshData}
+      >
+        Обновить
+      </button>
+      <label for="pageSize" class="text-sm text-slate-500">Размер страницы</label>
+      <select
+        id="pageSize"
+        bind:value={pageSize}
+        class="w-24 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+        on:change={onPageSizeChange}
+      >
+        <option value="5">5</option>
+        <option value="10">10</option>
+        <option value="25">25</option>
+        <option value="50">50</option>
+      </select>
     </div>
   </div>
 
-  {#if loading}
-    <div class="app-text-muted py-10 text-center text-sm">{t('imdg.loading', $language)}</div>
-  {:else}
-    <div class="app-surface-soft max-h-[68vh] overflow-auto rounded-xl">
-      <table class="app-table min-w-[920px]">
-        <colgroup>
+  <div class="relative overflow-auto rounded-lg border border-slate-200">
+    {#if loading}
+      <div class="absolute left-0 right-0 top-0 z-30 h-1 bg-slate-100">
+        <div
+          class="h-full bg-blue-600 transition-[width] duration-150 ease-out"
+          style={`width:${loadingProgress}%`}
+        ></div>
+      </div>
+    {/if}
+    {#if loading}
+      <div class="pointer-events-none absolute inset-0 z-20 bg-white/50"></div>
+    {/if}
+    <table class="min-w-[980px] table-fixed border-separate border-spacing-0">
+      <thead>
+        <tr class="sticky top-0 z-10 bg-slate-50">
           {#each columns as col}
-            <col style={`width: ${getColumnWidth(col)}px; min-width: ${getColumnWidth(col)}px;`} />
+            <th class="min-w-[120px] max-w-[500px] border-b border-r border-slate-200 px-3 py-2 text-left text-xs font-semibold text-slate-600 last:border-r-0">
+              {col}
+            </th>
           {/each}
-        </colgroup>
-        <thead>
-          <tr class="text-left">
-            {#each columns as col}
-              <th class="px-3 py-2 relative">
-                <div class="pr-3">{col}</div>
-                <button
-                  type="button"
-                  class="col-resize-handle"
-                  aria-label="Resize column"
-                  on:pointerdown={(e) => onResizeHandlePointerDown(e, col)}
-                  on:mousedown={(e) => onResizeHandleMouseDown(e, col)}
-                ></button>
-              </th>
-            {/each}
-          </tr>
-          <tr>
-            {#each columns as col}
-              <th class="px-3 pt-2 pb-2 text-left">
-                {#if isNarrowColumn(col) && activeFilterColumn !== col}
-                  <button
-                    type="button"
-                    class="filter-icon-btn"
-                    aria-label={t('imdg.filter', $language)}
-                    title={t('imdg.filter', $language)}
-                    on:click={() => openNarrowFilter(col)}
-                  >
-                    ⌕
-                  </button>
+        </tr>
+        <tr class="sticky top-9 z-[9] bg-slate-50">
+          {#each columns as col}
+            <th class="min-w-[120px] max-w-[500px] border-b border-r border-slate-200 px-3 pb-2 text-left last:border-r-0">
+              <div class="relative">
+                {#if excludedFilterColumns.has(col)}
+                  <div class="h-[30px]"></div>
                 {:else}
                   <input
-                    id={filterId(col)}
-                    class="app-input app-input-inline app-filter-input py-1.5 text-xs"
-                    style={`width:${filterInputWidth(col)}px`}
-                    placeholder={t('imdg.filter', $language)}
-                    value={columnFilters[col] ?? ''}
+                    class="min-w-[96px] w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                    type="text"
+                    placeholder="Фильтр"
+                    title={filterHint(col)}
+                    value={filters[col] ?? ''}
                     on:focus={() => (focusedFilterColumn = col)}
                     on:blur={() => {
-                      focusedFilterColumn = null;
-                      if (isNarrowColumn(col)) activeFilterColumn = null;
+                      if (focusedFilterColumn === col) focusedFilterColumn = null;
                     }}
-                    on:input={(e) => setColumnFilter(col, (e.currentTarget as HTMLInputElement).value)}
+                    on:input={(e) => onFilterInput(col, (e.currentTarget as HTMLInputElement).value)}
+                    on:keydown={onFilterKeyDown}
                   />
+                  {#if focusedFilterColumn === col && (filters[col] ?? '').trim() !== ''}
+                    <div class="pointer-events-none absolute left-0 top-[calc(100%+6px)] z-30 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white shadow-sm">
+                      ⏎ Enter
+                    </div>
+                  {/if}
                 {/if}
-              </th>
-            {/each}
+              </div>
+            </th>
+          {/each}
+        </tr>
+      </thead>
+      <tbody>
+        {#if items.length === 0}
+          <tr>
+            <td class="px-3 py-4 text-sm text-slate-500" colspan={Math.max(columns.length, 1)}>
+              {loading ? 'Загрузка...' : 'Нет данных'}
+            </td>
           </tr>
-        </thead>
-        <tbody>
-          {#if filteredItems.length === 0}
-            <tr>
-              <td class="px-3 py-5 text-sm app-text-muted" colspan={Math.max(columns.length, 1)}>
-                {t('imdg.noData', $language)}
-              </td>
+        {:else}
+          {#each items as item}
+            <tr class="hover:bg-slate-50">
+              {#each columns as col}
+                <td class="max-w-[500px] truncate border-b border-slate-100 px-3 py-2 text-sm">{String(item[col] ?? '—')}</td>
+              {/each}
             </tr>
-          {:else}
-            {#each filteredItems as it}
-              <tr class="imdg-row-clickable" on:click={() => openDetails(it)}>
-                {#each columns as col}
-                  <td class="px-3 py-2 text-sm">{formatCellValue(col, it[col])}</td>
-                {/each}
-              </tr>
-            {/each}
-          {/if}
-        </tbody>
-      </table>
-    </div>
+          {/each}
+        {/if}
+      </tbody>
+    </table>
+  </div>
 
-  <div class="imdg-pagination mt-3 flex items-center justify-between gap-2">
-      <div class="app-text-muted text-sm">{t('imdg.total', $language)} {total}</div>
-      <div class="ml-auto flex items-center gap-3">
-        <div class="flex items-center gap-2">
-          <label for="page" class="app-text-muted text-sm">{t('imdg.page', $language)}</label>
-          <input
-            id="page"
-            type="number"
-            bind:value={page}
-            min="1"
-            max={maxPage}
-            class="app-input app-input-inline"
-            style="width: 76px"
-            on:change={load}
-          />
-
-          <label for="pageSize" class="app-text-muted text-sm">{t('imdg.pageSize', $language)}</label>
-          <select
-            id="pageSize"
-            bind:value={pageSize}
-            class="app-input app-input-inline"
-            style="width: 90px"
-            on:change={onPageSizeChange}
-          >
-            <option value="5">5</option>
-            <option value="10">10</option>
-            <option value="25">25</option>
-            <option value="50">50</option>
-          </select>
-        </div>
-
-        <div class="flex items-center gap-2">
-          <button class="app-btn app-btn-ghost" on:click={goPrev} disabled={page <= 1}>{t('imdg.prev', $language)}</button>
-          <button class="app-btn app-btn-ghost" on:click={goNext} disabled={page >= maxPage}>{t('imdg.next', $language)}</button>
-        </div>
-      </div>
-    </div>
-  {/if}
-</section>
-
-{#if selectedItem}
-  <div
-    class="imdg-modal-backdrop"
-    aria-hidden="true"
-    on:pointerdown={(e) => {
-      if (e.target === e.currentTarget) closeDetails();
-    }}
-  >
-    <div class="imdg-modal app-surface">
-      <div class="mb-3 flex items-center justify-between gap-3">
-        <h3 class="text-lg font-semibold">{t('imdg.details.title', $language)}</h3>
-        <button class="app-btn app-btn-ghost" on:click={closeDetails}>{t('toasts.close', $language)}</button>
-      </div>
-
-      <div class="imdg-details-grid">
-        {#each detailsEntries as [key, value]}
-          <div class="imdg-details-row">
-            <div class="app-text-muted text-xs sm:text-sm">{key}</div>
-            <div class="imdg-details-value-row">
-              <div class="text-sm sm:text-base break-all">{formatCellValue(key, value)}</div>
-              <button class="app-btn app-btn-ghost imdg-copy-btn" on:click={() => copyValue(value)}>
-                {t('imdg.copy.action', $language)}
-              </button>
-            </div>
-          </div>
-        {/each}
-      </div>
+  <div class="mt-3 flex items-center justify-between gap-3">
+    <div class="text-sm text-slate-500">Страница: {page} / {maxPage}</div>
+    <div class="flex items-center gap-2">
+      <button
+        class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        on:click={goPrev}
+        disabled={page <= 1}
+      >
+        Назад
+      </button>
+      <button
+        class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        on:click={goNext}
+        disabled={page >= maxPage}
+      >
+        Вперёд
+      </button>
     </div>
   </div>
-{/if}
+</section>

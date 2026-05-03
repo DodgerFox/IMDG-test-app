@@ -19,7 +19,6 @@ npm run prepare
 ```bash
 npm run typecheck
 npm run lint
-npm run test
 npm run build
 ```
 
@@ -31,4 +30,4 @@ npm run format
 
 Notes
 - If you hit permission errors during `npm install`, fix ownership of `~/.npm` and `node_modules` then retry.
-- CI runs typecheck, lint, test and build on push/PR to `main`.
+- CI runs typecheck, lint and build on push/PR to `main`.

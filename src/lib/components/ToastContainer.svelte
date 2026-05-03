@@ -1,7 +1,6 @@
 <script lang="ts">
   import { fade, fly } from 'svelte/transition';
   import { toasts } from '$lib/toasts';
-  import { language, t } from '$lib/i18n';
 
   const colorByType = (type: 'success' | 'error' | 'info'): string => {
     if (type === 'success') return 'border-green-200 bg-green-50 text-green-900';
@@ -10,9 +9,9 @@
   };
 
   const titleByType = (type: 'success' | 'error' | 'info'): string => {
-    if (type === 'success') return t('toast.success.title', $language);
-    if (type === 'error') return t('toast.error.title', $language);
-    return t('toast.info.title', $language);
+    if (type === 'success') return 'Успешно';
+    if (type === 'error') return 'Ошибка';
+    return 'Инфо';
   };
 
   const iconByType = (type: 'success' | 'error' | 'info'): string => {
@@ -44,7 +43,7 @@
             class="shrink-0 rounded px-2 py-1 text-xs opacity-80 hover:opacity-100"
             on:click={() => toasts.remove(toast.id)}
           >
-            {t('toasts.close', $language)}
+            Закрыть
           </button>
         </div>
       </div>

@@ -3,7 +3,6 @@
   import { goto } from '$app/navigation';
   import { writable } from 'svelte/store';
   import { toasts } from '$lib/toasts';
-  import { language, t } from '$lib/i18n';
 
   const email = writable('');
   const password = writable('');
@@ -13,15 +12,15 @@
     const normalized = msg.trim().toLowerCase();
 
     if (normalized === 'email is required') {
-      return t('login.error.emailRequired', $language);
+      return 'Email обязателен';
     }
 
     if (normalized === 'password is required') {
-      return t('login.error.passwordRequired', $language);
+      return 'Пароль обязателен';
     }
 
     if (normalized.includes('неверный логин или пароль') || normalized.includes('invalid credentials')) {
-      return t('login.error.invalidCredentials', $language);
+      return 'Неверный логин или пароль';
     }
 
     return msg;
@@ -42,11 +41,11 @@
           try {
             const parsed = JSON.parse(maybeJson);
             if (parsed?.statusCode === 401) {
-              return t('login.error.invalidCredentials', $language);
+              return 'Неверный логин или пароль';
             }
 
             if (parsed?.statusCode >= 500) {
-              return t('login.error.serverUnavailable', $language);
+              return 'Сервер временно недоступен';
             }
 
             if (parsed?.message) return mapApiMessage(String(parsed.message));
@@ -56,18 +55,18 @@
         }
 
         if (payload.startsWith('401')) {
-          return t('login.error.invalidCredentials', $language);
+          return 'Неверный логин или пароль';
         }
 
         if (payload.startsWith('5')) {
-          return t('login.error.serverUnavailable', $language);
+          return 'Сервер временно недоступен';
         }
       }
 
       return mapApiMessage(raw);
     }
 
-    return t('login.error.default', $language);
+    return 'Ошибка входа';
   }
 
   import { get } from 'svelte/store';
@@ -79,7 +78,7 @@
       const em = get(email);
       const pw = get(password);
       await login(em, pw);
-      toasts.success(t('login.success', $language));
+      toasts.success('Вход выполнен');
       // After login go to registry
       goto('/imdg');
     } catch (err) {
@@ -90,19 +89,35 @@
   };
 </script>
 
-<section class="app-surface mx-auto max-w-md rounded-2xl p-6 sm:p-7">
-  <h1 class="mb-5 text-3xl font-semibold">{t('login.title', $language)}</h1>
+<section class="mx-auto max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7">
+  <h1 class="mb-5 text-3xl font-semibold">Вход</h1>
   <form on:submit|preventDefault={submit} class="space-y-4">
     <div>
-      <label for="email" class="app-text-muted block text-sm font-medium">{t('login.email', $language)}</label>
-      <input id="email" bind:value={$email} class="app-input mt-1" autocomplete="username" />
+      <label for="email" class="block text-sm font-medium text-slate-600">Email</label>
+      <input
+        id="email"
+        bind:value={$email}
+        class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+        autocomplete="username"
+      />
     </div>
     <div>
-      <label for="password" class="app-text-muted block text-sm font-medium">{t('login.password', $language)}</label>
-      <input id="password" type="password" bind:value={$password} class="app-input mt-1" autocomplete="current-password" />
+      <label for="password" class="block text-sm font-medium text-slate-600">Пароль</label>
+      <input
+        id="password"
+        type="password"
+        bind:value={$password}
+        class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+        autocomplete="current-password"
+      />
     </div>
     <div class="flex justify-end">
-      <button class="app-btn app-btn-primary px-5 py-2" disabled={$loading}>{t('login.submit', $language)}</button>
+      <button
+        class="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+        disabled={$loading}
+      >
+        Войти
+      </button>
     </div>
   </form>
 </section>
